@@ -8,6 +8,7 @@ Kristian: 202208514@post.au.dk & Clara: 202204626@post.au.dk
 In this project, we examine how the Austro-Hungarian composer and pianist Franz Liszt was received in Danish media when he came to Denmark in 1841.
 By using text mining in R Studio we have been looking at the words that were used to describe Franz Liszt and in which context they appeared alongside with a sentiment analysis that assesses the emotion of the words and sentences.
 
+There are some differences between the knitted version and the RMarkdown as the knitted version doesn’t contain a link to the article in Mediestream nor which newspaper the octograms appeared in. 
 
 ## Data Acquisition and Processing
 
