@@ -1,0 +1,382 @@
+---
+title: "Franz Liszt - The reception of the virtous composer in Danish newspapers"
+author: "Kristian Søe Corvalan and Clara Katrine Sydow"
+date: 'Created on 24 october 2023 and updated `r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+# Downloading the packages needed
+```{r, message=FALSE}
+library(tidyverse)
+library(tidytext)
+library(lubridate)
+library(ggwordcloud)
+
+```
+
+# Loading Data 
+The data we are loading is 158 news articles from Danish newspapers about the virtuoso Franz Liszt in the period 01-01-1841 to 01-01-1842. We have chosen this year because this is when Franz Liszt visited Denmark and played three concerts in Copenhagen during July 1841.
+
+We used the following code to extract these newspaper articles from Mediestream:
+Fran* Lis*t AND iso_date:[1841-01-01 TO 1842-01-01]  
+```{r}
+raw_liszt <- read_csv("http://labs.statsbiblioteket.dk/labsapi/api/aviser/export/fields?query=Fran%2A%20Lis%2At%20AND%20iso_date%3A%5B1841-01-01%20TO%201842-01-01%5D%20&fields=link&fields=recordID&fields=timestamp&fields=pwa&fields=cer&fields=fulltext_org&fields=pageUUID&fields=editionUUID&fields=titleUUID&fields=editionId&fields=familyId&fields=newspaper_page&fields=newspaper_edition&fields=lplace&fields=location_name&fields=location_coordinates&max=-1&structure=header&structure=content&format=CSV")
+```
+
+# The text mining task
+Firstly we want to do text mining on the news articles. We would like to figure out which words were most frequently used to describe Franz Liszt in the articles in different newspapers from different Danish cities. Furthermore, we are interested in figuring out whether there's a difference in the way the newspapers in the capitol, Copenhagen, describes Liszt in contrast to newspapers in the rest of the country - perhaps because of the bourgeoisie?
+
+# Remove newspapers from West Indian Isles
+We want to remove the newspapers from the West Indian Isles as we don't view these as part of our geographical focus.
+
+```{r}
+liszt_denmark <-raw_liszt %>% 
+  filter(!lplace %in% c("Charlotte Amalie", "Christianssted"))
+```
+
+## Splitting
+We want to break the full text into individual words, so that each word has its own row. We use the unnest_tokens function. 
+
+```{r}
+liszt_denmark %>% 
+  unnest_tokens(word, fulltext_org) -> liszt_tidy
+
+```
+
+## Count words per city
+Since we are interested in the newspapers in the different cities we want to look at how many times each word appear in each city:
+
+```{r}
+liszt_tidy %>% 
+  count(word, lplace, sort = "TRUE")
+
+```
+As shown in the data frame above filler words are the most frequent ones. These do not show us anything interesting about Liszt, and are therefore not useful in our examination. We want to be able to compare the frequency of the words across the different cities. This can be done by measuring each word's frequency.
+
+Firstly we will make R count the number of words per city. To do this we use the following functions: count, group_by and summarise:
+```{r}
+liszt_tidy %>% 
+  count(word, lplace, sort = TRUE) %>% 
+  group_by(lplace) %>% 
+  summarise(total = sum(n)) -> total_words
+
+
+```
+
+By using the function called: left_join we will add the total number of words to our dataframe:
+
+```{r}
+liszt_tidy %>% 
+  count(word, lplace, sort = "TRUE") %>% 
+  left_join(total_words, by = "lplace") -> liszt_counts 
+
+```
+
+# Frequency 
+The many prepositions and particles will appear frequently in every city. To exclude these words that appear frequently we will calculate the frequency of words and terms. Furthermore we can make a more interesting comparison of the words that occur in the different cities. This means that we punish the words that appear a lot across the different cities:
+
+We will use the inversed document frequency(idf):
+
+Words appearing a lot across cities wil get an idf score of 0 which gives it a tf_idf (term frequency multiplied by inversed document frequency) that is 0 as well. 
+
+To do this to all the words in the articles we use the bind_tf_idf function:
+```{r}
+liszt_counts %>% 
+  bind_tf_idf(word, lplace, n) -> liszt_tfidf
+
+liszt_tfidf
+
+
+```
+The list above still shows a lot of filler words, which is due to the fact that R lists the words in a lowest to highest ranking. We want the opposite, a descending ranking therefore we ask R to do this with the arrange function. desc = descending. 
+```{r}
+liszt_tfidf %>% 
+  arrange(desc(tf_idf))
+```
+
+# Add a Danish stopword list
+There is still a lot of filler words that are not necessary for our investigation of the Danish newspapers. We will therefore try to remove some of these words with a Danish stop word list
+
+# Downloading a Danish stopword list
+```{r}
+stopord <- read_csv("https://gist.githubusercontent.com/maxodsbjerg/f2271ec1a1d76af4b91eaa78cf6f2016/raw/059220dc20c68a2bdd00b0699cf97c23ddbc7f04/stopord.txt")
+```
+
+# Removing the Danish stop words from the file called liszt_tfidf
+
+```{r}
+liszt_tfidf_nostop <- liszt_tfidf %>% 
+  anti_join(stopord)
+```
+# Making a word cloud
+Making a word cloud showing important words that are used the to describe Franz Liszt in the different Danish cities 
+
+```{r}
+liszt_tfidf_nostop %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(word = factor(word, levels = rev(unique(word)))) %>% 
+  group_by(lplace) %>% 
+  top_n(8) %>% 
+  ungroup %>%
+  ggplot(aes(label = word, size = tf_idf, color = tf_idf)) +
+  geom_text_wordcloud_area() +
+  scale_size_area(max_size = 5) +
+  theme_minimal() +
+  facet_wrap(~lplace, ncol = 4, scales = "free") +
+  scale_color_gradient(low = "red", high = "dark red") +
+  labs(
+      title = "Important words describing Liszt ind Danish newspapers in different cities",
+       subtitle = "Importance determined by term frequency (tf) - inversed document frequency(idf)",
+      caption = "Data from Mediestream Experimental API")
+```
+
+## Saving the image
+```{r}
+ggsave("Figures/importantwords.tiff", width = 20, height = 25, units = "cm")
+```
+
+# Adding words to the stop word list
+As the word cloud above shows, there are still lots of unnecessary words. We want to remove some of these to see if more relevant words show up.
+
+We have added the stop word list we used above, made by Max, to an excel so that we could add our own words. This list we will download now:
+
+```{r}
+new_stopword <- read.csv("Data/Stopordsliste_FranzLiszt.csv")
+```
+
+## Adding the list to our data frame 
+
+```{r}
+liszt_new_nostop <- liszt_tfidf_nostop %>% 
+  anti_join(new_stopword)
+```
+# Making a new word cloud without the stop words we have added
+
+```{r}
+liszt_new_nostop %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(word = factor(word, levels = rev(unique(word)))) %>% 
+  group_by(lplace) %>% 
+  top_n(8) %>% 
+  ungroup %>%
+  ggplot(aes(label = word, size = tf_idf, color = tf_idf)) +
+  geom_text_wordcloud_area() +
+  scale_size_area(max_size = 5) +
+  theme_minimal() +
+  facet_wrap(~lplace, ncol = 4, scales = "free") +
+  scale_color_gradient(low = "red", high = "dark red") +
+  labs(
+      title = "Important words describing Liszt ind Danish newspapers in different cities with new stopword list",
+      caption = "Data from Mediestream Experimental API")
+```
+
+## Saving the image
+```{r}
+ggsave("Figures/ImportantWords_WithoutAllStopwords.tiff", width = 20, height = 25, units = "cm")
+```
+
+# Making word clouds for individual cities
+Some of the word clouds are very unclear. Therefore, we want to make some individual word clouds.
+
+## Roskilde word cloud
+
+```{r}
+Liszt_only_roskilde <- liszt_new_nostop %>% 
+  filter(lplace %in% c("Roskilde"))
+```
+
+
+```{r}
+Liszt_only_roskilde %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(word = factor(word, levels = rev(unique(word)))) %>% 
+  group_by(lplace) %>% 
+  top_n(8) %>% 
+  ungroup %>%
+  ggplot(aes(label = word, size = tf_idf, color = tf_idf)) +
+  geom_text_wordcloud_area() +
+  scale_size_area(max_size = 5) +
+  theme_minimal() +
+  facet_wrap(~lplace, ncol = 4, scales = "free") +
+  scale_color_gradient(low = "red", high = "dark red") +
+  labs(
+      title = "Important words in Roskilde",
+      caption = "Data from Mediestream Experimental API")
+```
+### Saving the image
+```{r}
+ggsave("Figures/Roskilde_wordcloud.tiff", width = 20, height = 25, units = "cm")
+```
+
+
+## Århus word cloud
+Aarhus is both spelled with an "å" and "aa", therefore we will showcase both word clouds here.
+
+```{r}
+Liszt_only_aarhus <- liszt_new_nostop %>% 
+  filter(lplace %in% c("Århus", "Aarhus"))
+```
+
+
+```{r}
+Liszt_only_aarhus %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(word = factor(word, levels = rev(unique(word)))) %>% 
+  group_by(lplace) %>% 
+  top_n(8) %>% 
+  ungroup %>%
+  ggplot(aes(label = word, size = tf_idf, color = tf_idf)) +
+  geom_text_wordcloud_area() +
+  scale_size_area(max_size = 5) +
+  theme_minimal() +
+  facet_wrap(~lplace, ncol = 4, scales = "free") +
+  scale_color_gradient(low = "red", high = "dark red") +
+  labs(
+      title = "Important words in Aarhus/Århus",
+      caption = "Data from Mediestream Experimental API")
+```
+
+### Saving the image
+
+```{r}
+ggsave("Figures/Aarhus_wordcloud.tiff", width = 20, height = 25, units = "cm")
+
+```
+
+With this word cloud we are starting to see some words that could be interesting to get a closer look at the individual words used to describe Franz Liszt in the different cities' newspapers.
+
+In Århus/Aarhus it would be interesting to see the context of words like "beundre"(admire) and "publikum" (audience).
+
+# Finding the context
+Splitting up the full text, not in one word pr. row, but in sequences of eight, so that you quickly can find the context of the word you are looking for. These are called octograms.
+We use the columns from the liszt_denmark containing the full text and then we tell R to split the tokens into ngrams where the value should be 8 - meaning an octogram.
+
+```{r}
+liszt_denmark %>% 
+  unnest_tokens(octogram, fulltext_org, token = "ngrams", n = 8) -> octogram
+```
+
+## Splitting the word in the octogram into seperate words
+To make it easier to filter the words in the octograms, we separate the eight words with the separate function.
+```{r}
+octogram %>% 
+  separate(octogram, c("word1", "word2", "word3", "word4", "word5", "word6", "word7", "word8"), sep = " ") -> octogram_sep
+```
+
+
+## The specific search for interesting words
+We use the filter function to first tell R which specific city we are interested in and afterwards what word we want it to look for, and where in the sequence the words should appear. 
+
+This means that we now can take a closer look at the context which our interesting words occur in. 
+
+### Examples
+First example the word "beundre" from Aarhus:
+
+```{r}
+octogram_sep %>% 
+  filter(lplace == "Århus") %>% 
+  filter(word8 == "beundre") %>% 
+  unite(octogram, word1, word2, word3, word4, word5, word6, word7, word8, sep = " ") %>% 
+  select(octogram, everything())-> beundre
+beundre
+```
+
+This shows us that the word "beundre" (admire) appears in correlation to Franz Liszt. But it also shows us the major problem with the OCR scan of the articles written with Gothic letters: Liszt's name has been separated into different words and been misspelled: "frants li sir"
+
+
+If the context is interesting we can click on the arrow to the right and the links for the articles will appear and lead you directly to the article in Mediestream (only available in Rmarkdown). 
+
+
+A word like "publikum" is also a word that springs to mind: 
+
+```{r}
+octogram_sep %>% 
+  filter(lplace == "Aarhus") %>% 
+  filter(word1 == "publikum") %>% 
+  unite(octogram, word1, word2, word3, word4, word5, word6, word7, word8, sep = " ") %>% 
+  select(octogram, everything())-> publikum
+publikum
+```
+
+This show us that the word "publikum" (audience) appears in correlation with Liszt as well, and that he for example played "La Marseillaise", and something about the audience clapping. 
+
+
+# SENTIDA - Danish sentiment analysis  
+We will now use the Danish sentiment analysis, Sentida, to find out whether the words used in articles about Franz Liszt were rather positive or negative. Sentida uses a scoring system from -5 to 5, which indicates the sentiment of a word or a sentence. -5 has the most negative connotations while 5 is the most positive. 
+
+The Sentida tool is available at Github, where the founders of the tool have made it available for free. 
+
+```{r}
+library(devtools)
+
+if(!require("devtools")) install.packages("devtools")
+
+devtools::install_github("Guscode/Sentida")
+
+library(Sentida)
+
+# Code to include the danish letters æ, ø and å
+Sys.setlocale(category = "LC_ALL", locale = "UTF-8") 
+```
+# Sentida analysis of all words 
+
+To make sure that the Sentida analysis will only analyze on words from the text and not from other columns in our dataframe, we will make a dataframe only containing the words: 
+```{r}
+liszt_only_words <-liszt_new_nostop %>% 
+  select(word) 
+```
+
+Using the Sentida function:
+```{r}
+sentida(liszt_only_words, output = "mean")
+```
+
+This score indicates a very weak positive emotion in the scale of -5 to 5. 
+
+# Sentida analysis - Copenhagen vs. rest of Denmark 
+Since we had the hypotheses from the start that Copenhagen will be more positive towards Franz Liszt we would like to see if there's any difference in the sentiment score if we analyse Copenhagen and the rest of Denmark separately. 
+
+## Without Copenhagen
+Sentiment analysis without Copenhagen: 
+```{r}
+liszt_no_cph <-liszt_new_nostop %>% 
+  filter(!lplace %in% c("Charlotte Amalie", "Christianssted", "København" ))
+```
+
+To make sure that it is only words from the text that get analysed:
+```{r}
+liszt_word_no_cph <-liszt_no_cph %>% 
+  select(word) 
+```
+
+Using the Sentida function:
+```{r}
+sentida(liszt_word_no_cph, output = "mean")
+```
+
+## Only Copenhagen
+Sentiment analysis with only Copenhagen
+```{r}
+liszt_only_cph <- liszt_tfidf %>% 
+  filter(!lplace %in% c("Aalborg", "Aarhus", "Haderslev", "Hillerød", "Nykøbing Falster", "Odense", "Ribe", "Roskilde", "Slagelse", "Thisted", "Viborg", "Århus" ))
+```
+
+To make sure that it is only words from the text that gets analysed:
+```{r}
+liszt_text_only_cph <-liszt_only_cph %>% 
+  select(word) 
+```
+
+Using the Sentida function:
+```{r}
+sentida(liszt_text_only_cph, output ="mean")
+```
+
+## Results 
+
+To judge from these Sentida scores the rest of Denmark uses slightly more positive words in articles about Franz Liszt than Copenhagen. We can thereby deny our hypotheses. 
+
+
