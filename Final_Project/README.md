@@ -21,5 +21,6 @@ Computing platform: Macbook Air (2020), 8 Gb RAM, macOS Ventura 13.4.
 
 Installation requirements & dependencies for software not used in class: 
 For RStudio: SENTIDA https://github.com/Guscode/Sentida/blob/master/README.md
-Licence
+
+## Licence
 Our project is licensed under the Creative Commons Legal Code: CC0 1.0 Universal 
